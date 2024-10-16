@@ -1,9 +1,9 @@
-import { Component, OnDestroy } from '@angular/core';
+import { Component, OnDestroy ,NgZone } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { FormsModule } from '@angular/forms';
 import { CommonModule } from '@angular/common';
 import {
-  HttpClientModule,
+  
   HttpClient,
   provideHttpClient,
 } from '@angular/common/http';
@@ -19,7 +19,7 @@ import { importProvidersFrom } from '@angular/core';
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [FormsModule, CommonModule, HttpClientModule],
+  imports: [FormsModule, CommonModule],
   template: `
     <div class="container">
       <h1>Angular Translator</h1>
@@ -42,9 +42,7 @@ import { importProvidersFrom } from '@angular/core';
         </div>
         <div class="output-section">
           <h2>Translation:</h2>
-          <p class="translation-result" [class.placeholder]="!translatedText">
-            {{ translatedText || 'Translation will appear here' }}
-          </p>
+          <pre class="translation-result" [class.placeholder]="!translatedText">{{ translatedText || 'Translation will appear here' }}</pre>
           <p *ngIf="isTranslating" class="translating-message">
             <i class="fas fa-spinner fa-spin"></i> Translating...
           </p>
@@ -81,7 +79,7 @@ import { importProvidersFrom } from '@angular/core';
       padding: 20px;
       margin-bottom: 20px;
     }
-    textarea {
+    textarea, .translation-result {
       width: 100%;
       padding: 12px;
       border: 1px solid #ddd;
@@ -89,6 +87,13 @@ import { importProvidersFrom } from '@angular/core';
       font-size: 16px;
       resize: vertical;
       margin-bottom: 10px;
+      min-height: 100px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      font-family: 'Roboto', sans-serif;
+    }
+    .translation-result {
+      background-color: #ecf0f1;
     }
     .button-group {
       display: flex;
@@ -134,16 +139,6 @@ import { importProvidersFrom } from '@angular/core';
       color: #2c3e50;
       margin-bottom: 10px;
       font-size: 18px;
-    }
-    .translation-result {
-      background-color: #ecf0f1;
-      border: 1px solid #bdc3c7;
-      border-radius: 4px;
-      padding: 12px;
-      font-size: 16px;
-      min-height: 60px;
-      display: flex;
-      align-items: center;
     }
     .translation-result.placeholder {
       color: #95a5a6;
@@ -191,7 +186,7 @@ export class App implements OnDestroy {
   private inputSubject = new Subject<string>();
   private inputSubscription: Subscription | undefined;
 
-  constructor(private http: HttpClient) {
+  constructor(private http: HttpClient, private ngZone:NgZone) {
     this.inputSubscription = this.inputSubject
       .pipe(
         debounceTime(100),
@@ -221,7 +216,7 @@ export class App implements OnDestroy {
           response.data.translations &&
           response.data.translations.length > 0
         ) {
-          this.translatedText = response.data.translations[0].translatedText;
+          this.translatedText = this.formatTranslation(response.data.translations[0].translatedText);
         } else if (response.length === 0) {
           this.translatedText = '';
         } else {
@@ -243,19 +238,30 @@ export class App implements OnDestroy {
   startSpeechRecognition() {
     if ('webkitSpeechRecognition' in window) {
       const recognition = new (window as any).webkitSpeechRecognition();
-      recognition.lang = 'en-US';
-      recognition.interimResults = false;
+      recognition.lang = 'en';
+      recognition.interimResults = true;
+      recognition.continuous = true;
 
       recognition.onstart = () => {
         this.error = null;
-        this.inputText = 'Listening...';
+        this.ngZone.run(() => {
+          this.inputText = 'Listening...';
+        })
       };
 
       recognition.onresult = (event: any) => {
-        if (event.results.length > 0) {
-          this.inputText = event.results[0][0].transcript;
-          this.translateText();
+        // Kiểm tra tất cả các kết quả
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          // Lấy transcript của kết quả
+          transcript += event.results[i][0].transcript
         }
+        
+        // Chạy trong ngữ cảnh Angular
+        this.ngZone.run(() => {
+          this.inputText = transcript; // Cập nhật inputText với transcript mới
+          this.translateText(); // Gọi hàm dịch
+        });
       };
 
       recognition.onerror = (event: any) => {
@@ -293,8 +299,22 @@ export class App implements OnDestroy {
       format: 'text',
     };
   }
+
+  private formatTranslation(text: string): string {
+    const inputLines = this.inputText.split('\n');
+    const translatedLines = text.split('\n');
+    let formattedTranslation = '';
+
+    for (let i = 0; i < Math.max(inputLines.length, translatedLines.length); i++) {
+      if (inputLines[i]) {
+        formattedTranslation += (translatedLines[i] || '') + '\n';
+      }
+    }
+
+    return formattedTranslation.trim();
+  }
 }
 
 bootstrapApplication(App, {
-  providers: [importProvidersFrom(HttpClientModule), provideHttpClient()],
+  providers: [ provideHttpClient()],
 }).catch((err) => console.error(err));
